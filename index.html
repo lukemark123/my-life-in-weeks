@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>My Life in Weeks – by Luke</title>
+  <style>
+    :root{--bg:#0a0a0a;--text:#fff;--future:#222;--lived:#ff2e63;--accent:#00ff9d;--highlight:#ffd700}
+    .theme-barbie{--lived:#ff4d95;--accent:#ff9ed4;--highlight:#ff69b4}
+    .theme-matrix{--lived:#00ff9d;--accent:#39ff14;--highlight:#00ff41;--bg:#000}
+    body{margin:0;padding:20px;min-height:100vh;background:var(--bg);color:var(--text);
+         font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;
+         transition:background .4s}
+    h1{font-size:clamp(2.5rem,8vw,5rem);margin:20px 0;background:linear-gradient(90deg,var(--lived),var(--accent));
+       -webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:900}
+    .grid{display:grid;grid-template-columns:repeat(52,minmax(14px,1fr));gap:6px;max-width:95vw;margin:40px 0}
+    .week{width:100%;padding-bottom:100%;border-radius:50%;background:var(--future);
+          cursor:pointer;transition:transform .4s,box-shadow .4s;position:relative}
+    .week.lived{background:var(--lived);box-shadow:0 0 20px var(--lived)66;animation:breathe 8s infinite}
+    .week.today{background:var(--accent);transform:scale(1.6);box-shadow:0 0 30px var(--accent);animation:pulse 2s infinite}
+    .week.highlight{transform:scale(1.4);background:var(--highlight);box-shadow:0 0 25px var(--highlight)}
+    .week:hover{transform:scale(2.8);z-index:100}
+    .tooltip{position:absolute;bottom:120%;left:50%;transform:translateX(-50%);
+             background:rgba(0,0,0,.9);color:white;padding:8px 14px;border-radius:12px;
+             font-size:14px;white-space:nowrap;opacity:0;transition:opacity .3s;pointer-events:none}
+    .week:hover .tooltip{opacity:1}
+    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:1000;
+            align-items:center;justify-content:center;flex-direction:column;padding:20px}
+    .modal img{max-width:90vw;max-height:70vh;border-radius:16px}
+    .modal .caption{margin-top:20px;font-size:1.8rem}
+    .controls button,.controls select{margin:8px;padding:12px 24px;border:none;border-radius:50px;
+                      background:var(--accent);color:#000;font-weight:bold;cursor:pointer}
+    .save-notice{position:fixed;bottom:20px;right:20px;background:#00ff9d;color:#000;padding:12px 20px;
+                  border-radius:50px;font-weight:bold;opacity:0;transition:opacity .5s;z-index:999}
+    #editor{display:none;position:fixed;inset:0;background:rgba(0,0,0,.98);z-index:2000;padding:20px;overflow:auto;color:white}
+    #eventList .event{margin:15px 0;padding:15px;background:#222;border-radius:12px;position:relative}
+    .delete-btn{position:absolute;top:8px;right:8px;background:#ff2e63;color:white;border:none;
+                 width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:20px}
+    @keyframes breathe{0%,100%{box-shadow:0 0 20px var(--lived)66}50%{box-shadow:0 0 35px var(--lived)}}
+    @keyframes pulse{0%,100%{transform:scale(1.5)}50%{transform:scale(1.8)}}
+  </style>
+</head>
+<body>
+
+<h1>My Life in Weeks</h1>
+<p id="subtitle">Week <span id="currentWeek">0</span> • Auto-saved forever</p>
+
+<div class="grid" id="grid"></div>
+
+<div class="controls">
+  <button onclick="toggleEditor()">Edit My Life</button>
+  <select id="theme" onchange="setTheme(this.value)">
+    <option value="">Dark</option>
+    <option value="theme-barbie">Barbie</option>
+    <option value="theme-matrix">Matrix</option>
+  </select>
+  <button onclick="exportPNG()">Export Poster</button>
+  <button onclick="downloadBackup()">Backup (.json)</button>
+  <label class="btn" style="background:#444">Restore <input type="file" id="import" onchange="importBackup(this.files[0])" accept=".json" hidden></label>
+</div>
+
+<div class="save-notice" id="saved">Saved!</div>
+
+<!-- Editor -->
+<div id="editor">
+  <h2>Edit Your Life</h2>
+  <label>Birthday</label>
+  <input type="date" id="birthdate">
+  <h3 style="margin-top:30px">Memories</h3>
+  <div id="eventList"></div>
+  <div style="text-align:center;margin:30px 0">
+    <button onclick="addEvent()" style="background:#ffd700;color:black">+ Add Memory</button>
+    <button onclick="closeEditor()" style="background:#00ff9d;color:black;margin-left:12px">Done</button>
+  </div>
+</div>
+
+<!-- Photo Modal -->
+<div class="modal" id="modal" onclick="this.style.display='none'">
+  <img id="modalImg">
+  <div class="caption" id="modalCaption"></div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<script>
+/* ================================================
+   My Life in Weeks – Fully offline & editable
+   Coded with love by Luke – 2025
+   ================================================ */
+
+const STORAGE_KEY = 'MyLifeInWeeks2025';
+
+let life = {
+  birthday: "1995-08-15",
+  theme: "",
+  events: [
+    {date:"2017-06-10", label:"Graduated", media:"graduation", color:"#ffd700"},
+    {date:"2022-09-24", label:"Got married", media:"https://images.unsplash.com/photo-1519742866993-66d3cfef4bbd?w=800", color:"#ff69b4"}
+  ]
+};
+
+// Load saved data
+if (localStorage.getItem(STORAGE_KEY)) {
+  life = JSON.parse(localStorage.getItem(STORAGE_KEY));
+}
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(life));
+  const n = document.getElementById('saved');
+  n.style.opacity = '1';
+  setTimeout(() => n.style.opacity = '0', 1500);
+}
+
+function dateToWeek(dateStr) {
+  const diff = new Date(dateStr) - new Date(life.birthday);
+  return Math.floor(diff / (1000*60*60*24*7));
+}
+
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  const todayWeek = dateToWeek(new Date());
+  document.getElementById('currentWeek').textContent = todayWeek.toLocaleString();
+
+  for (let i = 0; i < 90*52; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'week';
+    if (i <= todayWeek) dot.classList.add('lived');
+    if (i === todayWeek) dot.classList.add('today');
+
+    const weekDate = new Date(life.birthday);
+    weekDate.setDate(weekDate.getDate() + i*7);
+
+    const ev = life.events.find(e => Math.abs(dateToWeek(e.date) - i) <= 1);
+    if (ev) {
+      dot.classList.add('highlight');
+      if (ev.color) dot.style.background = ev.color;
+      const isImg = ev.media.startsWith('http') || ev.media.startsWith('data:');
+      dot.innerHTML = `<div class="tooltip">${ev.label}<br>${weekDate.toLocaleDateString()}</div>`;
+      dot.onclick = () => {
+        if (isImg) {
+          document.getElementById('modalImg').src = ev.media;
+          document.getElementById('modalCaption').innerHTML = `${ev.label}<br><small>${weekDate.toLocaleDateString()}</small>`;
+          document.getElementById('modal').style.display = 'flex';
+        }
+        confetti();
+      };
+    } else {
+      dot.innerHTML = `<div class="tooltip">Week ${i+1}<br>${weekDate.toLocaleDateString()}</div>`;
+    }
+    grid.appendChild(dot);
+  }
+}
+
+function toggleEditor() {
+  const ed = document.getElementById('editor');
+  if (ed.style.display === 'flex') closeEditor();
+  else {
+    document.getElementById('birthdate').value = life.birthday;
+    loadEvents();
+    ed.style.display = 'flex';
+  }
+}
+
+function closeEditor() {
+  life.birthday = document.getElementById('birthdate').value;
+  save(); render();
+  document.getElementById('editor').style.display = 'none';
+}
+
+function loadEvents() {
+  const list = document.getElementById('eventList');
+  list.innerHTML = '';
+  life.events.forEach((ev,i) => {
+    const div = document.createElement('div');
+    div.className = 'event';
+    div.innerHTML = `
+      <input type="date" value="${ev.date}" onchange="life.events[${i}].date=this.value;save()">
+      <input type="text" value="${ev.label}" onchange="life.events[${i}].label=this.value;save()">
+      <input type="text" value="${ev.media}" placeholder="emoji or photo URL" onchange="life.events[${i}].media=this.value;save()">
+      <input type="color" value="${ev.color||'#ffd700'}" onchange="life.events[${i}].color=this.value;save()">
+      <button class="delete-btn" onclick="life.events.splice(${i},1);save();loadEvents();render()">×</button>
+    `;
+    list.appendChild(div);
+  });
+}
+
+function addEvent() {
+  life.events.push({date:new Date().toISOString().slice(0,10), label:"New memory", media:"sparkles", color:"#ffd700"});
+  save(); loadEvents(); render();
+}
+
+function setTheme(t) { life.theme = t; document.body.className = t; save(); }
+function exportPNG() { html2canvas(document.body,{scale:4}).then(c=>{let a=document.createElement('a');a.href=c.toDataURL();a.download='My-Life-in-Weeks.png';a.click();}); }
+function downloadBackup() { let a=document.createElement('a'); a.href='data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(life)); a.download='life-backup-'+new Date().toISOString().slice(0,10)+'.json'; a.click(); }
+function importBackup(file) { let r=new FileReader(); r.onload=e=>{life=JSON.parse(e.target.result);save();render();alert('Life restored!');}; r.readAsText(file); }
+
+function confetti() {
+  const cvs = document.createElement('canvas');
+  cvs.style.position='fixed';cvs.style.inset='0';cvs.style.pointerEvents='none';
+  document.body.appendChild(cvs);
+  const ctx = cvs.getContext('2d');
+  cvs.width = innerWidth; cvs.height = innerHeight;
+  let p = Array.from({length:120},()=>({
+    x:innerWidth/2,y:innerHeight/2,
+    vx:(Math.random()-0.5)*20,vy:(Math.random()-0.5)*20,
+    color:`hsl(${Math.random()*360},100%,50%)`,size:Math.random()*6+4,alpha:1
+  }));
+  function anim(){
+    ctx.clearRect(0,0,cvs.width,cvs.height);
+    p.forEach(o=>{o.x+=o.vx;o.y+=o.vy;o.vy+=0.5;o.alpha-=0.02;
+      ctx.globalAlpha=o.alpha;ctx.fillStyle=o.color;ctx.fillRect(o.x,o.y,o.size,o.size)});
+    if(p.some(o=>o.alpha>0)) requestAnimationFrame(anim);
+    else cvs.remove();
+  }
+  anim();
+}
+
+// Init
+document.body.className = life.theme;
+render();
+</script>
+</body>
+</html>
